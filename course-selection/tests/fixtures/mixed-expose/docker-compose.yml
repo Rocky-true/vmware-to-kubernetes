@@ -1,0 +1,11 @@
+services:
+  api:
+    image: myapi:1.0
+    ports:
+      - "8000:8000"
+    expose:
+      - "9000"
+  internal:
+    image: redis:7-alpine
+    expose:
+      - "6379"

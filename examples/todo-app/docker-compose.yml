@@ -1,0 +1,19 @@
+services:
+  backend:
+    build: ./backend
+    image: todo-backend:1.0
+    environment:
+      DB_PATH: /data/todo.db
+    ports:
+      - "8001:8000"
+    volumes:
+      - todo-data:/data
+  frontend:
+    build: ./frontend
+    image: todo-frontend:1.0
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+volumes:
+  todo-data:

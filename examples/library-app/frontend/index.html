@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图书借阅 · K8s 迁移演示</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", sans-serif;
+         background: #f5f6f8; color: #1f2329; }
+  header { background: #165dff; color: #fff; padding: 18px 28px; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  main { max-width: 860px; margin: 24px auto; padding: 0 16px; }
+  .card { background: #fff; border-radius: 10px; padding: 20px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  input { flex: 1; min-width: 140px; padding: 9px 12px;
+          border: 1px solid #d0d3d9; border-radius: 6px; font-size: 14px; }
+  button { padding: 9px 16px; border: 0; border-radius: 6px;
+           background: #165dff; color: #fff; cursor: pointer; font-size: 14px; }
+  button.ghost { background: #eef2ff; color: #165dff; }
+  button.warn { background: #fff1f0; color: #cf1322; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #eef0f3;
+           font-size: 14px; }
+  th { color: #646a73; font-weight: 500; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px;
+         font-size: 12px; background: #e8f3ff; color: #165dff; }
+  .tag.out { background: #fff2e8; color: #d4380d; }
+  .muted { color: #8f959e; font-size: 13px; }
+  #stats { font-size: 13px; color: #646a73; }
+</style>
+</head>
+<body>
+<header><h1>图书借阅系统 <span style="font-weight:400;opacity:.75">VMware → Kubernetes 迁移演示</span></h1></header>
+<main>
+  <div class="card">
+    <div class="row" style="margin-bottom:12px">
+      <input id="title" placeholder="书名">
+      <input id="author" placeholder="作者">
+      <button onclick="addBook()">添加图书</button>
+    </div>
+    <div class="row" style="margin-bottom:14px">
+      <input id="reader" placeholder="借阅人姓名">
+      <button class="ghost" onclick="load()">刷新</button>
+      <span id="stats"></span>
+    </div>
+    <table>
+      <thead><tr><th>ID</th><th>书名</th><th>作者</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody id="books"></tbody>
+    </table>
+  </div>
+  <p class="muted">数据存储于 PostgreSQL（K8s 中为 PVC）；前端 nginx 反向代理 /api 到 FastAPI。</p>
+</main>
+<script>
+async function api(path, method = "GET", body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? {"Content-Type": "application/json"} : {},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!res.ok) {
+    let msg = res.status;
+    try { msg = (await res.json()).detail || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+async function load() {
+  const books = await api("/api/books");
+  const stats = await api("/api/stats");
+  document.getElementById("stats").textContent =
+    `共 ${stats.total} 本，借出 ${stats.borrowed} 本`;
+  document.getElementById("books").innerHTML = books.map(b => `
+    <tr>
+      <td>${b.id}</td>
+      <td>${b.title}</td>
+      <td>${b.author}</td>
+      <td>${b.reader
+        ? `<span class="tag out">借出 · ${b.reader}</span>`
+        : `<span class="tag">在馆</span>`}</td>
+      <td>${b.reader
+        ? `<button class="warn" onclick="returnBook(${b.id})">归还</button>`
+        : `<button class="ghost" onclick="borrow(${b.id})">借阅</button>`}</td>
+    </tr>`).join("");
+}
+
+async function addBook() {
+  const title = document.getElementById("title").value.trim();
+  const author = document.getElementById("author").value.trim();
+  if (!title || !author) return alert("请填写书名和作者");
+  try {
+    await api("/api/books", "POST", {title, author});
+    document.getElementById("title").value = "";
+    document.getElementById("author").value = "";
+    await load();
+  } catch (e) { alert("添加失败: " + e.message); }
+}
+
+async function borrow(id) {
+  const reader = document.getElementById("reader").value.trim();
+  if (!reader) return alert("请先填写借阅人姓名");
+  try { await api(`/api/books/${id}/borrow`, "POST", {reader}); await load(); }
+  catch (e) { alert("借阅失败: " + e.message); }
+}
+
+async function returnBook(id) {
+  try { await api(`/api/books/${id}/return`, "POST"); await load(); }
+  catch (e) { alert("归还失败: " + e.message); }
+}
+
+load().catch(e => alert("加载失败: " + e.message));
+</script>
+</body>
+</html>

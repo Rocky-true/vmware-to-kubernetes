@@ -1,0 +1,10 @@
+services:
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+  worker:
+    build: ./worker
+    command: python worker.py
+  web:
+    image: nginx:1.25-alpine

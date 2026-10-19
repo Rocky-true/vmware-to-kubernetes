@@ -1,0 +1,21 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass shortpass
+    ports:
+      - "6379:6379"
+  backend:
+    build: ./backend
+    image: shortener-backend:1.0
+    environment:
+      REDIS_HOST: redis
+      REDIS_PASS: shortpass
+    ports:
+      - "8003:8000"
+  frontend:
+    build: ./frontend
+    image: shortener-frontend:1.0
+    ports:
+      - "8083:80"
+    depends_on:
+      - backend

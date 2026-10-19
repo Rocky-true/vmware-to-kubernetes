@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: migration-config
+  namespace: course-selection
+data:
+  MYSQL_DATABASE: course
+  DB_MODE: mysql
+  STORE_MODE: redis
+  DB_HOST: mysql
+  REDIS_HOST: redis
+  STUDENT_COUNT: '40000'
+  COURSE_COUNT: '300'
+  COURSE_CAPACITY: '120'

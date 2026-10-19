@@ -1,0 +1,16 @@
+region        = "cn-guangzhou"
+worker_count  = 3
+node_password = "ChangeMe@2026"
+
+# 只允许你的出口 IP 访问 SSH/NodePort；留空则不创建这些规则。
+# 可用 https://ifconfig.me 查询，格式必须带掩码。
+admin_cidr = "203.0.113.10/32"
+
+# 如需公开暴露 NodePort，显式放开；默认复用 admin_cidr。
+# nodeport_cidr = "0.0.0.0/0"
+
+# 80/443 默认公开；不需要可留空。
+web_cidr = "0.0.0.0/0"
+
+# 默认创建内网 SLB 承担 3 master API 入口；仅演示时可关闭。
+enable_ha_slb = true

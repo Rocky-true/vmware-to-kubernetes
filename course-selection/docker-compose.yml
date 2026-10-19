@@ -1,0 +1,58 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: course-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: xhh123456
+      MYSQL_DATABASE: course
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pxhh123456"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: course-redis
+    command: ["redis-server", "--requirepass", "xhh123456"]
+    ports:
+      - "6379:6379"
+
+  app:
+    build: ./app
+    image: course-app:1.0
+    container_name: course-app
+    environment:
+      DB_MODE: mysql
+      STORE_MODE: redis
+      DB_HOST: mysql
+      DB_PASS: xhh123456
+      REDIS_HOST: redis
+      REDIS_PASS: xhh123456
+      STUDENT_COUNT: "40000"
+      COURSE_COUNT: "300"
+      COURSE_CAPACITY: "120"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: course-nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8088:80"
+    depends_on:
+      - app
+
+volumes:
+  mysql-data:

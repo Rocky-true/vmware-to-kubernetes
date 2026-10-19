@@ -1,0 +1,8 @@
+services:
+  web:
+    image: nginx:1.25-alpine
+    ports:
+      - "8088:80"
+  cache:
+    image: redis:7-alpine
+    command: redis-server --requirepass secret123

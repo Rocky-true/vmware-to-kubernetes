@@ -1,0 +1,17 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+terraform.tfvars
+backend.tf
+kubekey-cluster.yaml
+keys/
+*.tar.gz
+*.log
+course-selection/app/course.db*
+__pycache__/
+*-k8s/
+data-migration/
+node_password.txt
+k8slab-params.json
+runs/

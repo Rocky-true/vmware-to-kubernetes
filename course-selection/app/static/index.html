@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>校园选课系统 · 高并发演示</title>
+<style>
+  :root{--brand:#1f4e79;--bg:#f5f7fa}
+  *{box-sizing:border-box}
+  body{font-family:"Microsoft YaHei",sans-serif;background:var(--bg);margin:0;color:#222}
+  header{background:var(--brand);color:#fff;padding:18px 28px}
+  header h1{margin:0;font-size:20px}
+  .wrap{max-width:1100px;margin:20px auto;padding:0 16px}
+  .bar{display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+  input{padding:8px 10px;border:1px solid #ccd;border-radius:6px;width:160px}
+  button{padding:8px 14px;border:0;border-radius:6px;background:var(--brand);color:#fff;cursor:pointer}
+  button:hover{opacity:.9}
+  button.small{padding:4px 10px;font-size:13px}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden}
+  th,td{padding:9px 12px;border-bottom:1px solid #eef;text-align:left;font-size:14px}
+  th{background:#eef4fa;color:#1f4e79}
+  .tag-full{color:#c00}.tag-ok{color:#1a7f37}
+  .stat{font-size:13px;color:#666}
+  tr:hover td{background:#fafcff}
+</style>
+</head>
+<body>
+<header><h1>📚 校园选课系统 · 高并发演示（4万学生规模）</h1></header>
+<div class="wrap">
+  <div class="bar">
+    <span>学号：</span><input id="sid" type="number" min="1" max="40000" placeholder="1-40000" value="1">
+    <button onclick="loadCourses()">刷新课程</button>
+    <span id="msg" class="stat">就绪</span>
+  </div>
+  <table>
+    <thead><tr><th>课程ID</th><th>课程名称</th><th>教师</th><th>容量</th><th>剩余</th><th>操作</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+<script>
+async function loadCourses(){
+  try {
+    const r = await fetch('/api/courses');
+    const d = await r.json();
+    const tb = document.getElementById('tbody');
+    tb.innerHTML = d.items.map(c=>`<tr>
+      <td>${c.id}</td><td>${c.name}</td><td>${c.teacher}</td><td>${c.capacity}</td>
+      <td>${c.remaining}</td>
+      <td>${c.remaining>0?'<button class="small" onclick="selectCourse('+c.id+')">选课</button>':'<span class="tag-full">已满</span>'}</td>
+    </tr>`).join('');
+  } catch(e) { document.getElementById('msg').textContent = '加载失败: '+e; }
+}
+async function selectCourse(cid){
+  const sid = Number(document.getElementById('sid').value || 1);
+  const r = await fetch('/api/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({student_id:sid,course_id:cid})});
+  const d = await r.json();
+  document.getElementById('msg').textContent = `[${new Date().toLocaleTimeString()}] ${d.msg || d.detail}（剩余 ${d.remaining ?? '-'}）`;
+  loadCourses();
+}
+loadCourses();
+</script>
+</body>
+</html>

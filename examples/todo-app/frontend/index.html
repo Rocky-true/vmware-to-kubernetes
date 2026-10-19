@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Todo App</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px}
+  h1{color:#1f4e79}
+  .row{display:flex;gap:8px;margin:16px 0}
+  input{flex:1;padding:8px;border:1px solid #ccd;border-radius:6px}
+  button{padding:8px 14px;border:0;border-radius:6px;background:#1f4e79;color:#fff;cursor:pointer}
+  li{display:flex;justify-content:space-between;padding:8px;border-bottom:1px solid #eee}
+  li.done span{text-decoration:line-through;color:#999}
+  .ops button{background:none;color:#1f4e79;padding:2px 6px}
+</style>
+</head>
+<body>
+<h1>📝 Todo App</h1>
+<div class="row">
+  <input id="title" placeholder="输入待办事项...">
+  <button onclick="add()">添加</button>
+</div>
+<ul id="list"></ul>
+<script>
+async function load(){
+  const list = await (await fetch('/api/todos')).json();
+  document.getElementById('list').innerHTML = list.map(t=>`
+    <li class="${t.done?'done':''}">
+      <span>${t.title}</span>
+      <span class="ops">
+        <button onclick="toggle(${t.id})">${t.done?'撤销':'完成'}</button>
+        <button onclick="del(${t.id})">删除</button>
+      </span>
+    </li>`).join('');
+}
+async function add(){
+  const title = document.getElementById('title').value.trim();
+  if(!title) return;
+  await fetch('/api/todos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})});
+  document.getElementById('title').value='';
+  load();
+}
+async function toggle(id){ await fetch(`/api/todos/${id}/toggle`,{method:'POST'}); load(); }
+async function del(id){ await fetch(`/api/todos/${id}`,{method:'DELETE'}); load(); }
+load();
+</script>
+</body>
+</html>

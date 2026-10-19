@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>URL Shortener</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 16px}
+  h1{color:#1f4e79}
+  .row{display:flex;gap:8px;margin:16px 0}
+  input{flex:1;padding:8px;border:1px solid #ccd;border-radius:6px}
+  button{padding:8px 14px;border:0;border-radius:6px;background:#1f4e79;color:#fff;cursor:pointer}
+  table{width:100%;border-collapse:collapse}
+  td,th{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:14px}
+  code{background:#eef4fa;padding:2px 6px;border-radius:4px;color:#1f4e79}
+</style>
+</head>
+<body>
+<h1>🔗 URL Shortener</h1>
+<div class="row">
+  <input id="url" placeholder="https://example.com/very/long/path">
+  <button onclick="create()">生成短链</button>
+</div>
+<div id="msg"></div>
+<table>
+  <thead><tr><th>短码</th><th>原链接</th></tr></thead>
+  <tbody id="list"></tbody>
+</table>
+<script>
+async function load(){
+  const links = await (await fetch('/api/links')).json();
+  document.getElementById('list').innerHTML = links.map(l=>
+    `<tr><td><code>${l.code}</code></td><td>${l.url}</td></tr>`).join('');
+}
+async function create(){
+  const url = document.getElementById('url').value.trim();
+  if(!url) return;
+  const d = await (await fetch('/api/shorten',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})})).json();
+  document.getElementById('msg').textContent = `已生成短码：${d.code}`;
+  document.getElementById('url').value='';
+  load();
+}
+load();
+</script>
+</body>
+</html>

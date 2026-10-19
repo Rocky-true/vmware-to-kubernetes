@@ -1,0 +1,29 @@
+#cloud-config
+write_files:
+  - path: /etc/modules-load.d/k8s.conf
+    permissions: '0644'
+    content: |
+      overlay
+      br_netfilter
+  - path: /etc/sysctl.d/99-k8s.conf
+    permissions: '0644'
+    content: |
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+runcmd:
+  - |
+    # 关闭swap（kubelet要求）
+    swapoff -a || true
+    sed -i '/ swap / s/^/#/' /etc/fstab || true
+    # 内核模块与参数
+    modprobe overlay || true
+    modprobe br_netfilter || true
+    sysctl --system || true
+    # 允许root密码SSH（Kubekey需要）
+    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+    systemctl restart ssh || systemctl restart sshd || true
+    # 基础依赖
+    apt-get update -y
+    apt-get install -y conntrack socat curl tar >/dev/null 2>&1 || true

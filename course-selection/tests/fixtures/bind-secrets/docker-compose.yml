@@ -1,0 +1,16 @@
+services:
+  web:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./default.conf:/etc/nginx/conf.d/default.conf:ro
+    env_file:
+      - .env
+    secrets:
+      - db_password
+    environment:
+      APP_MODE: production
+secrets:
+  db_password:
+    file: ./db_password.txt

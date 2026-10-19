@@ -1,0 +1,15 @@
+services:
+  backend:
+    build: ./backend
+    image: weather-backend:1.0
+    environment:
+      CITY: Guangzhou
+    ports:
+      - "8002:8000"
+  frontend:
+    build: ./frontend
+    image: weather-frontend:1.0
+    ports:
+      - "8082:80"
+    depends_on:
+      - backend
