@@ -51,10 +51,53 @@ def t_render_kubekey():
     assert data["spec"]["controlPlaneEndpoint"]["address"] == "10.0.0.11"
 
 
+def t_registry_config():
+    out = tempfile.mkdtemp(prefix="k8slab-registry-")
+    outputs = {
+        "master_private_ips": ["10.0.0.11"],
+        "worker_private_ips": ["10.0.0.21"],
+    }
+    path = k8slab.render_kubekey(
+        Path(out), outputs, "pw",
+        private_registry="harbor.example.com",
+        local_registry=False,
+        registry_namespace="k8s",
+        registry_auth={"username": "user", "password": "pass"},
+        insecure_registries=["harbor.example.com"])
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    registry = data["spec"]["registry"]
+    assert registry["privateRegistry"] == "harbor.example.com"
+    assert registry["namespaceOverride"] == "k8s"
+    assert registry["insecureRegistries"] == ["harbor.example.com"]
+    assert registry["auths"]["harbor.example.com"]["username"] == "user"
+    assert registry["auths"]["harbor.example.com"]["password"] == "pass"
+    assert registry["auths"]["harbor.example.com"]["skipTLSVerify"] is True
+    assert "registry" not in data["spec"]["roleGroups"]
+
+    path = k8slab.render_kubekey(
+        Path(out), outputs, "pw", private_registry="10.0.0.11",
+        local_registry=True)
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    assert data["spec"]["roleGroups"]["registry"] == ["master1"]
+
+
+def t_split_registry():
+    assert k8slab.split_registry(
+        "https://harbor.example.com/k8s/") == (
+            "harbor.example.com", "k8s", "harbor.example.com/k8s")
+    assert k8slab.split_registry("registry:5000") == (
+        "registry:5000", "kubesphereio", "registry:5000")
+    assert k8slab.split_registry("") == ("", "", "")
+
+
 def main():
     cases = [
         ("sanitize_name", t_sanitize_name),
         ("render_kubekey", t_render_kubekey),
+        ("registry_config", t_registry_config),
+        ("split_registry", t_split_registry),
     ]
     ok = all([check(n, f) for n, f in cases])
     print("\n结果: %s" % ("全部通过" if ok else "存在失败"))

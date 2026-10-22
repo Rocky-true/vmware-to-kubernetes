@@ -7,10 +7,10 @@ import tempfile
 import types
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(BASE)
-REPO = os.path.dirname(ROOT)
+REPO = os.path.dirname(BASE)
+ROOT = os.path.join(REPO, "course-selection")
 DM = os.path.join(ROOT, "datamigrate.py")
-FIXTURES = os.path.join(BASE, "fixtures")
+FIXTURES = os.path.join(ROOT, "tests", "fixtures")
 ENV = dict(os.environ, PYTHONIOENCODING="utf-8")
 
 

@@ -56,17 +56,19 @@ def shq(s):
 
 
 def run(cmd, cwd=None, env=None, timeout=None, capture=False, check=True,
-        quiet=False, allow_timeout=False):
+        quiet=False, allow_timeout=False, input_text=None):
     printable = " ".join(str(c) for c in cmd)
     printable = re.sub(r"(-var node_password=)\S+", r"\1***", printable)
     printable = re.sub(r"(NODE_PASSWORD=)'[^']*'", r"\1'***'", printable)
     printable = re.sub(r"(--node-password\s+)\S+", r"\1***", printable)
     printable = re.sub(r"(--password\s+)\S+", r"\1***", printable)
+    printable = re.sub(r"(--registry-password\s+)\S+", r"\1***", printable)
     if not quiet:
         log("+ " + printable)
     try:
         r = subprocess.run(
             cmd, cwd=cwd, env=env, timeout=timeout, text=True,
+            input=input_text,
             stdout=subprocess.PIPE if capture else None,
             stderr=subprocess.PIPE if capture else None,
         )
@@ -227,10 +229,10 @@ def scp_argv(key):
 
 
 def ssh_run(host, key, cmd, timeout=None, capture=False, check=True,
-            quiet=False, allow_timeout=False):
+            quiet=False, allow_timeout=False, input_text=None):
     return run(ssh_argv(host, key) + [cmd], timeout=timeout,
                capture=capture, check=check, quiet=quiet,
-               allow_timeout=allow_timeout)
+               allow_timeout=allow_timeout, input_text=input_text)
 
 
 def scp_file(local, host, dest, key):
@@ -305,7 +307,32 @@ def gen_key(workdir):
     return key
 
 
-def render_kubekey(workdir, outputs, password, private_registry=None):
+def split_registry(value):
+    raw = str(value or "").strip().rstrip("/")
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    if not raw:
+        return "", "", ""
+    parts = raw.split("/", 1)
+    host = parts[0]
+    namespace = parts[1].strip("/") if len(parts) > 1 else ""
+    return host, namespace or "kubesphereio", raw
+
+
+def docker_login(host, username, password, remote=None, key=None):
+    if not username:
+        return
+    cmd = ["docker", "login", host, "-u", username, "--password-stdin"]
+    if remote:
+        ssh_run(remote, key, " ".join(shq(x) for x in cmd),
+                input_text=(password or "") + "\n", timeout=120)
+    else:
+        run(cmd, input_text=(password or "") + "\n", timeout=120)
+
+
+def render_kubekey(workdir, outputs, password, private_registry=None,
+                   local_registry=False, registry_namespace="kubesphereio",
+                   registry_auth=None, insecure_registries=None):
     yaml = ensure_yaml()
     masters = ["master%d" % (i + 1)
                for i in range(len(outputs["master_private_ips"]))]
@@ -318,6 +345,22 @@ def render_kubekey(workdir, outputs, password, private_registry=None):
     for name, ip in zip(workers, outputs["worker_private_ips"]):
         hosts.append({"name": name, "address": ip, "internalAddress": ip,
                       "user": "root", "password": password})
+
+    registry = {"privateRegistry": private_registry or ""}
+    if private_registry:
+        registry.update({
+            "namespaceOverride": registry_namespace or "kubesphereio",
+            "insecureRegistries": list(insecure_registries or []),
+        })
+        if registry_auth and registry_auth.get("username"):
+            entry = {
+                "username": registry_auth.get("username") or "",
+                "password": registry_auth.get("password") or "",
+            }
+            if insecure_registries:
+                entry["skipTLSVerify"] = True
+            registry["auths"] = {private_registry: entry}
+
     cfg = {
         "apiVersion": "kubekey.kubesphere.io/v1alpha2",
         "kind": "Cluster",
@@ -327,7 +370,7 @@ def render_kubekey(workdir, outputs, password, private_registry=None):
             "roleGroups": (
                 {"etcd": masters, "control-plane": masters,
                  "worker": workers, "registry": [masters[0]]}
-                if private_registry else
+                if local_registry else
                 {"etcd": masters, "control-plane": masters,
                  "worker": workers}),
             "controlPlaneEndpoint": {
@@ -342,11 +385,7 @@ def render_kubekey(workdir, outputs, password, private_registry=None):
             "network": {"plugin": "calico",
                         "kubePodsCIDR": "10.233.64.0/18",
                         "kubeServiceCIDR": "10.233.0.0/18"},
-            "registry": (
-                {"privateRegistry": private_registry,
-                 "namespaceOverride": "kubesphereio",
-                 "insecureRegistries": []}
-                if private_registry else {"privateRegistry": ""}),
+            "registry": registry,
         },
     }
     path = workdir / "kubekey-cluster.yaml"
@@ -431,12 +470,13 @@ def drop_incompatible_docker(host, key):
             timeout=900)
 
 
-def push_k8s_images(host, key, registry_addr):
-    log("==> 推送 K8s 基础镜像到 master registry（节点从master拉取）")
+def push_k8s_images(host, key, registry_addr, namespace="kubesphereio"):
+    log("==> 推送 K8s 基础镜像到 %s/%s" % (registry_addr, namespace))
     scp_file(BASE / "scripts" / "push-k8s-images.sh", host,
              "/root/push-k8s-images.sh", key)
     ssh_run(host, key,
-            "REG=%s bash /root/push-k8s-images.sh" % shq(registry_addr),
+            "REG=%s NS=%s bash /root/push-k8s-images.sh"
+            % (shq(registry_addr), shq(namespace)),
             timeout=2400)
 
 
@@ -590,6 +630,15 @@ def deploy_app(args, compose, workdir, master1, key, password):
     if mode == "save":
         cmd += ["--bundle", str(Path(args.bundle).resolve())]
     if mode == "registry":
+        if not args.registry:
+            die("registry 模式需要 --registry <镜像仓库地址>")
+        registry_host, _, _ = split_registry(args.registry)
+        registry_user = args.registry_user or os.environ.get(
+            "K8SLAB_REGISTRY_USER", "")
+        registry_password = args.registry_password or os.environ.get(
+            "K8SLAB_REGISTRY_PASSWORD", "")
+        if registry_user:
+            docker_login(registry_host, registry_user, registry_password)
         cmd += ["--registry", args.registry]
     env = os.environ.copy()
     env["DOCKER_DEFAULT_PLATFORM"] = "linux/amd64"
@@ -804,6 +853,33 @@ def cmd_up(args):
         log("  SSH/NodePort 来源: %s" % admin_cidr)
         log("  masters 私网: %s" % ", ".join(master_priv))
         log("  workers 私网: %s" % ", ".join(worker_priv))
+
+        registry_host, registry_namespace, registry_prefix = \
+            split_registry(args.registry)
+        external_registry = bool(registry_prefix and not args.private_registry)
+        registry_user = args.registry_user or os.environ.get(
+            "K8SLAB_REGISTRY_USER", "")
+        registry_password = args.registry_password or os.environ.get(
+            "K8SLAB_REGISTRY_PASSWORD", "")
+        registry_auth = ({"username": registry_user,
+                          "password": registry_password}
+                         if registry_user else None)
+        if args.registry:
+            args.registry = registry_prefix
+        if args.private_registry and args.registry_push_k8s:
+            die("--registry-push-k8s 只能用于外部 --registry，不能与 --private-registry 同时使用")
+        if args.registry_push_k8s and not external_registry:
+            die("--registry-push-k8s 需要同时提供外部 --registry")
+        if args.registry and not registry_host:
+            die("--registry 地址无效，应为 host 或 host/namespace")
+        if args.registry_insecure and not external_registry:
+            die("--registry-insecure 需要配合外部 --registry 使用")
+        if bool(registry_user) != bool(registry_password):
+            die("--registry-user 与 --registry-password 必须同时提供")
+        if external_registry:
+            log("  外部镜像仓库: %s/%s"
+                % (registry_host, registry_namespace))
+
         if args.ingress and not args.ingress_host:
             args.ingress_host = "%s.nip.io" % master1
             log("  Ingress 基础域名: %s" % args.ingress_host)
@@ -815,7 +891,15 @@ def cmd_up(args):
 
         kk_cfg = render_kubekey(
             workdir, outputs, password,
-            private_registry=master_priv[0] if args.private_registry else None)
+            private_registry=(master_priv[0] if args.private_registry
+                              else registry_host),
+            local_registry=args.private_registry,
+            registry_namespace=(registry_namespace if external_registry
+                                else "kubesphereio"),
+            registry_auth=(registry_auth if external_registry else None),
+            insecure_registries=([registry_host]
+                                 if external_registry and args.registry_insecure
+                                 else []))
         if args.private_registry:
             log("== [4/7] 初始化 master 本地镜像仓库")
             init_registry(host, str(key), kk_cfg)
@@ -825,6 +909,19 @@ def cmd_up(args):
                 ensure_docker(host, str(key))
                 push_k8s_images(host, str(key), master_priv[0])
             drop_incompatible_docker(host, str(key))
+        elif external_registry:
+            log("== [4/7] 使用外部镜像仓库 %s/%s"
+                % (registry_host, registry_namespace))
+            if args.registry_push_k8s:
+                ensure_docker(host, str(key))
+                docker_login(registry_host, registry_user, registry_password,
+                             remote=host, key=str(key))
+                push_k8s_images(host, str(key), registry_host,
+                                registry_namespace)
+                drop_incompatible_docker(host, str(key))
+            else:
+                log("确保该仓库已包含 Kubekey 所需基础镜像；"
+                    "首次可用 --registry-push-k8s 推送")
         log("== [4/7] 创建集群（3控制面 HA + %d worker）" % args.workers)
         start_kk(host, str(key), kk_cfg, workdir)
         wait_cluster(host, str(key), total_nodes, args.cluster_timeout)
@@ -923,6 +1020,21 @@ def cmd_destroy(args):
     pub = Path(workdir) / "id_ed25519.pub"
     if pub.is_file():
         extra += ["-var", "ssh_public_key_path=%s" % pub.as_posix()]
+    pw_file = Path(workdir) / "node_password.txt"
+    if pw_file.is_file():
+        extra += ["-var", "node_password=%s"
+                  % pw_file.read_text(encoding="utf-8").strip()]
+    params_file = Path(workdir) / "k8slab-params.json"
+    if params_file.is_file():
+        try:
+            params = json.loads(params_file.read_text(encoding="utf-8"))
+        except Exception:
+            params = {}
+        if params.get("key_pair_name"):
+            extra += ["-var", "key_pair_name=%s" % params["key_pair_name"]]
+        project = params.get("project") or meta.get("project")
+        if project:
+            extra += ["-var", "name_prefix=k8slab-%s" % project]
     if meta.get("region"):
         extra += ["-var", "region=%s" % meta["region"]]
     run([tf, "destroy", "-auto-approve", "-input=false", "-no-color"] + extra,
@@ -1021,7 +1133,16 @@ def main():
     u.add_argument("--image-mode", default="auto",
                    choices=["auto", "none", "build", "save", "registry"])
     u.add_argument("--bundle", default="")
-    u.add_argument("--registry", default="")
+    u.add_argument("--registry", default="",
+                   help="已有镜像仓库地址（可带命名空间）；K8s 基础镜像从该仓库拉取")
+    u.add_argument("--registry-user", default=os.environ.get(
+        "K8SLAB_REGISTRY_USER", ""), help="镜像仓库用户名")
+    u.add_argument("--registry-password", default=os.environ.get(
+        "K8SLAB_REGISTRY_PASSWORD", ""), help="镜像仓库密码")
+    u.add_argument("--registry-insecure", action="store_true",
+                   help="外部仓库使用 HTTP/自签证书（Kubekey insecureRegistries）")
+    u.add_argument("--registry-push-k8s", action="store_true",
+                   help="首次使用时把 Kubekey 基础镜像推送到外部仓库")
     u.add_argument("--ephemeral", action="store_true")
     u.add_argument("--ingress", action="store_true",
                    help="生成 nginx Ingress（需集群已有 ingress-controller）")
@@ -1032,7 +1153,7 @@ def main():
     u.add_argument("--ingress-class", default="nginx")
     u.add_argument("--ingress-tls-secret", default="")
     u.add_argument("--private-registry", action="store_true",
-                   help="在master1跑本地registry，节点镜像均从master拉取")
+                   help="在master1跑临时本地registry，节点镜像均从master拉取")
     u.add_argument("--verify", default="", help="svc=/path,svc2=/health")
     u.add_argument("--strict-bind", action="store_true",
                    help="bind 目录/缺失源直接失败，而不是跳过并告警")
