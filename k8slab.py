@@ -923,6 +923,21 @@ def cmd_destroy(args):
     pub = Path(workdir) / "id_ed25519.pub"
     if pub.is_file():
         extra += ["-var", "ssh_public_key_path=%s" % pub.as_posix()]
+    pw_file = Path(workdir) / "node_password.txt"
+    if pw_file.is_file():
+        extra += ["-var", "node_password=%s"
+                  % pw_file.read_text(encoding="utf-8").strip()]
+    params_file = Path(workdir) / "k8slab-params.json"
+    if params_file.is_file():
+        try:
+            params = json.loads(params_file.read_text(encoding="utf-8"))
+        except Exception:
+            params = {}
+        if params.get("key_pair_name"):
+            extra += ["-var", "key_pair_name=%s" % params["key_pair_name"]]
+        project = params.get("project") or meta.get("project")
+        if project:
+            extra += ["-var", "name_prefix=k8slab-%s" % project]
     if meta.get("region"):
         extra += ["-var", "region=%s" % meta["region"]]
     run([tf, "destroy", "-auto-approve", "-input=false", "-no-color"] + extra,
