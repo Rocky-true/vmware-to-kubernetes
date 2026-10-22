@@ -343,6 +343,23 @@ python course-selection/datamigrate.py run --plan data-migration/migration-plan.
 
 **A. 使用已有外部仓库（推荐 ACR/Harbor）**
 
+以阿里云 ACR 为例，先准备仓库：
+
+1. 在 ACR 控制台创建命名空间 `my-k8s`，获取仓库地址、用户名和密码，并确认 master 能访问该地址。
+2. 预推 Kubekey 基础镜像（只需一次）：
+
+```bash
+export REGISTRY_USER='<ACR 用户名>'
+export REGISTRY_PASSWORD='<ACR 密码>'
+docker login registry.cn-hangzhou.aliyuncs.com \
+  -u "$REGISTRY_USER" --password-stdin <<< "$REGISTRY_PASSWORD"
+REG=registry.cn-hangzhou.aliyuncs.com NS=my-k8s bash scripts/push-k8s-images.sh
+```
+
+PowerShell 登录写法：`$env:REGISTRY_PASSWORD | docker login registry.cn-hangzhou.aliyuncs.com -u $env:REGISTRY_USER --password-stdin`。Harbor 把地址换成 `harbor.example.com`、项目名换成 `my-k8s`；HTTP/自签仓库先配置 Docker 信任，并加 `--registry-insecure`。
+
+3. 用该仓库创建集群：
+
 ```bash
 python k8slab.py up \
   --compose examples/library-app/docker-compose.yml \
@@ -352,8 +369,20 @@ python k8slab.py up \
   --image-mode registry
 ```
 
+如果不想手动预推，首次在 `up` 时加 `--registry-push-k8s`，由 master 拉取并推送基础镜像；之后去掉该参数即可：
+
+```bash
+python k8slab.py up \
+  --compose examples/library-app/docker-compose.yml \
+  --registry registry.cn-hangzhou.aliyuncs.com/my-k8s \
+  --registry-user "$REGISTRY_USER" \
+  --registry-password "$REGISTRY_PASSWORD" \
+  --registry-push-k8s \
+  --image-mode registry
+```
+
 - K8s 基础镜像从 `<registry>/<namespace>` 拉取；`registry` 模式下业务镜像也推送到该前缀。地址不带路径时，K8s 命名空间默认 `kubesphereio`。
-- 仓库必须已包含 Kubekey 所需基础镜像；首次可加 `--registry-push-k8s`，从 `registry.cn-beijing.aliyuncs.com/kubesphereio` 拉取并推送，耗时较长。
+- 仓库必须已包含 Kubekey 所需基础镜像；`--registry-push-k8s` 会从 `registry.cn-beijing.aliyuncs.com/kubesphereio` 拉取并推送，首次耗时较长。
 - 认证也可用 `K8SLAB_REGISTRY_USER` / `K8SLAB_REGISTRY_PASSWORD`；节点认证写入 Kubekey `auths`，本机推送前自动执行 `docker login`。仓库密码会写入 master 上的 Kubekey 配置文件（权限 600）。
 - HTTP/自签仓库加 `--registry-insecure`；本机及 master 的 Docker 仍需信任该仓库。
 - 只写 `--registry` 而不指定 `--image-mode registry` 时，外部仓库只用于 K8s 基础镜像，业务镜像仍按 `auto` 模式处理。
