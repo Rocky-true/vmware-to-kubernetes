@@ -13,7 +13,7 @@
 - [环境要求](#环境要求)
 - [快速开始：阿里云](#快速开始阿里云)
 - [数据迁移（datamigrate）](#数据迁移datamigrate)
-- [k8slab 使用手册](#k8slab-使用手册)
+- [可选：Ingress](#可选ingress)
 - [部署到已有 K8s 集群](#部署到已有-k8s-集群)
 - [Compose 转换规则](#compose-转换规则)
 - [示例项目](#示例项目)
@@ -155,6 +155,8 @@ python k8slab.py up \
 
 仓库不需要认证时，去掉 `--registry-user` 和 `--registry-password`。只有希望业务镜像也推送到该仓库时，才需要加 `--image-mode registry`。
 
+地址格式是 `host/namespace`；不写 namespace 时默认 `kubesphereio`。仓库里没有 K8s 基础镜像时，不要指定 `--registry`，按默认方式直接拉取。默认 3 主 3 从；实验环境想省费用可加 `--no-ha`，worker 数量用 `--workers N`，其余参数见 `--help`。
+
 也可以使用环境变量提供凭证：
 
 ```bash
@@ -264,60 +266,7 @@ python course-selection/datamigrate.py run --plan data-migration/migration-plan.
 - `restore` 默认需要停机，并会覆盖同名对象；生产迁移先演练并保留可回滚备份。
 - Redis/SQLite/原始卷、helper 镜像等细节见 `--help`，不需要一开始就填。
 
-## k8slab 使用手册
-
-### 命令
-
-| 命令 | 说明 |
-|---|---|
-| `python k8slab.py doctor` | 检查 Python、SSH、Terraform、Docker 和文件完整性 |
-| `python k8slab.py up` | 创建阿里云资源、安装集群、部署应用 |
-| `python k8slab.py status` | 查看集群、Pod、Service 和访问地址 |
-| `python k8slab.py destroy` | 销毁资源，停止计费 |
-| `python k8slab.py export` | 导出可离线使用的新电脑工具包 |
-
-### 常用参数
-
-| 参数 | 说明 |
-|---|---|
-| `--compose PATH` | 必填，Compose 文件路径 |
-| `--ak` / `--sk` | 阿里云凭证；也可用环境变量 |
-| `--region` | 地域，默认 `cn-guangzhou` |
-| `--workers N` | worker 数量，默认 3 |
-| `--no-ha` | 不创建 SLB，API 回退到 master1（省费用） |
-| `--registry ADDR[/NS]` | 已有镜像仓库；不填则直接拉取 |
-| `--registry-user` / `--registry-password` | 仓库认证；不需要时省略 |
-| `--ingress` | 生成 nginx Ingress（可选） |
-| `--dry-run` | 只检查并展示计划，不创建资源 |
-
-其余参数（项目名、namespace、NodePort、网络 CIDR、超时、bind 校验、仓库 insecure 等）见 `python k8slab.py up --help`。
-
-### 镜像模式
-
-默认 `auto`：有 `build` 就本机构建，没有就拉取。离线时用 `--image-mode save --bundle images.tar.gz`；业务镜像也要推送到仓库时加 `--image-mode registry`。其他模式见 `--help`。
-
-### 镜像仓库（可选）
-
-**没有现成仓库（默认）**：不传 `--registry`，节点从公网或镜像加速拉取。
-
-**已有现成仓库**（仓库里已有 K8s 基础镜像）：直接写地址；需要认证再带用户名密码。
-
-```bash
-python k8slab.py up \
-  --compose examples/library-app/docker-compose.yml \
-  --ak <AccessKeyId> --sk <AccessKeySecret> \
-  --registry registry.example.com/my-k8s \
-  --registry-user <用户名> --registry-password <密码> \
-  --nodeport-start 30111
-```
-
-- ACR、Harbor 都可以，填控制台给的仓库地址即可。
-- 地址格式是 `host/namespace`；不写 namespace 时默认 `kubesphereio`。
-- 仓库里没有 K8s 基础镜像时，不要指定 `--registry`，按默认方式直接拉取。
-- 只有业务镜像也要推送到仓库时，才加 `--image-mode registry`。
-- 节点不能访问公网、必须用 master 做本地仓库时，属于高级场景，见 `--help` 的 `--private-registry`。
-
-### 可选：Ingress
+## 可选：Ingress
 
 默认用 NodePort，不需要额外配置。需要域名访问时加 `--ingress`：
 
@@ -331,6 +280,7 @@ python k8slab.py up \
 - 已有域名时加 `--ingress-host example.com`。
 - 单独转换时写 `--ingress --ingress-host example.com`。
 - 集群需要 ingress-controller；TLS、路径映射等高级参数见 `--help`。
+
 ## 部署到已有 K8s 集群
 
 只做转换和部署时，用 `vm2k8s`。两种常用方式：
