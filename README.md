@@ -87,8 +87,8 @@
 - 一条命令创建阿里云基础设施和 3 控制面 kubeadm HA 集群。
 - Compose 通用转换：端口、环境变量、命令、卷、健康检查、资源限制、secrets/configs。
 - 支持 `ports` 的 NodePort 暴露；可选 nginx Ingress。
-- 镜像交付支持本机构建、离线镜像包、外部镜像仓库（ACR/Harbor）和 master 本地临时仓库。
-- `--registry` 使用已有仓库；`--private-registry` 在 master 拉取一次基础镜像后分发给其他节点。
+- 镜像交付支持本机构建、离线镜像包和外部镜像仓库。
+- 默认直接拉取镜像；已有现成仓库时用 `--registry` 指定，没有就什么都不用加。
 - 自动生成 `06-deploy.sh`（apply + NodePort 分配）和 `MIGRATION.md`（服务表 + 风险告警）。
 - 针对国内网络适配：Kubekey 国内镜像、节点镜像加速、local-path、SSH 重试、systemd 托管后台任务。
 - 支持 `--depends-init` 将 Compose 启动依赖近似转换为 TCP 等待 initContainer。
@@ -133,12 +133,27 @@ python k8slab.py doctor
 
 ### 2. 创建集群并部署示例
 
+没有现成镜像仓库时，直接拉取即可，不需要额外参数：
+
 ```bash
 python k8slab.py up \
   --compose examples/library-app/docker-compose.yml \
   --ak <AccessKeyId> --sk <AccessKeySecret> \
-  --private-registry --nodeport-start 30111
+  --nodeport-start 30111
 ```
+
+如果已有现成镜像仓库（里面已经有 K8s 基础镜像），直接指定地址：
+
+```bash
+python k8slab.py up \
+  --compose examples/library-app/docker-compose.yml \
+  --ak <AccessKeyId> --sk <AccessKeySecret> \
+  --registry registry.example.com/my-k8s \
+  --registry-user <用户名> --registry-password <密码> \
+  --nodeport-start 30111
+```
+
+仓库不需要认证时，去掉 `--registry-user` 和 `--registry-password`。只有希望业务镜像也推送到该仓库时，才需要加 `--image-mode registry`。
 
 也可以使用环境变量提供凭证：
 
@@ -299,99 +314,49 @@ python course-selection/datamigrate.py run --plan data-migration/migration-plan.
 | `--ak` / `--sk` | 阿里云凭证；也可用 `ALICLOUD_ACCESS_KEY` / `ALICLOUD_SECRET_KEY` |
 | `--region` | 地域，默认 `cn-guangzhou` |
 | `--workers N` | worker 数量，默认 3 |
-| `--password VALUE` | 节点 root 密码；不传则自动生成并写入 `node_password.txt` |
-| `--bandwidth N` | ECS 公网出带宽，默认 5 Mbps |
-| `--admin-cidr CIDR` | 允许 SSH/NodePort 的来源；默认自动检测本机公网 IP |
-| `--nodeport-cidr CIDR` | 允许 NodePort 的来源；默认复用 `--admin-cidr` |
-| `--web-cidr CIDR` | 允许 80/443 的来源，默认 `0.0.0.0/0`；留空关闭 |
-| `--no-ha` | 不创建内网 SLB，API 回退到 master1（省费用） |
+| `--password VALUE` | 节点 root 密码；不传则自动生成 |
+| `--no-ha` | 不创建 SLB，API 回退到 master1（省费用） |
 | `--nodeport-start N` | NodePort 起始端口，默认 30080 |
-| `--image-mode MODE` | `auto` / `none` / `build` / `save` / `registry` |
+| `--image-mode MODE` | `auto` / `build` / `save` / `registry` |
 | `--bundle PATH` | `save` 模式使用的镜像包 |
-| `--registry ADDR[/NS]` | 外部镜像仓库；K8s 基础镜像从该仓库拉取，`registry` 模式业务镜像也推送至此 |
-| `--registry-user USER` | 外部仓库用户名，也可用 `K8SLAB_REGISTRY_USER` |
-| `--registry-password PASS` | 外部仓库密码，也可用 `K8SLAB_REGISTRY_PASSWORD` |
-| `--registry-insecure` | 外部仓库使用 HTTP/自签证书，写入 Kubekey `insecureRegistries` |
-| `--registry-push-k8s` | 首次把 Kubekey 基础镜像推送到外部仓库 |
-| `--private-registry` | 在 master 启动临时本地 registry，基础镜像从 master 分发 |
-| `--ephemeral` | 用 emptyDir 代替 PVC |
-| `--strict-bind` | bind 目录/缺失源直接失败 |
-| `--depends-init` | 将 `depends_on` 近似转为 TCP 等待 initContainer |
-| `--init-image IMAGE` | initContainer 镜像，默认 `busybox:1.36` |
-| `--ingress` | 生成 nginx Ingress（需已有 ingress-controller） |
-| `--ingress-host HOST` | 基础域名；k8slab 默认 `<master1>.nip.io` |
-| `--ingress-map MAP` | 显式映射：`服务=域名[/路径],...` |
-| `--ingress-class CLASS` | IngressClass，默认 `nginx` |
-| `--ingress-tls-secret NAME` | 已有 TLS Secret 名称 |
-| `--verify SPEC` | 部署后验证：`svc=/path,svc2=/health` |
+| `--registry ADDR[/NS]` | 已有镜像仓库；不填则直接拉取 |
+| `--registry-user USER` | 仓库用户名；不需要认证时省略 |
+| `--registry-password PASS` | 仓库密码；不需要认证时省略 |
+| `--ingress` | 生成 nginx Ingress（可选） |
 | `--workdir PATH` | 指定运行目录 |
 | `--dry-run` | 只检查并展示计划，不创建资源 |
 
-完整参数以 `python k8slab.py up --help` 为准。
+其余参数（网络 CIDR、超时、bind 校验、仓库 insecure 等）按需使用 `python k8slab.py up --help` 查看，不需要一开始就填。
 
 ### 镜像模式
 
 | 模式 | 适用场景 | 行为 |
 |---|---|---|
-| `auto` | 默认 | 有 `--bundle` 用 `save`；有 `build` 且本机 Docker 可用用 `build`；否则 `none` |
-| `none` | 公共镜像 | 节点通过网络或镜像加速拉取 |
+| `auto` | 默认 | 有 `--bundle` 用 `save`；有 `build` 且本机 Docker 可用用 `build`；否则直接拉取 |
 | `build` | 含 `build` 段 | 本机 Docker 构建并在需要时导出镜像包 |
 | `save` | 离线环境 | 使用 `--bundle` 指定的镜像包 |
-| `registry` | 已有镜像仓库 | 需配合 `--registry`；构建并推送，节点从仓库拉取 |
+| `registry` | 业务镜像也走仓库 | 配合 `--registry`，构建并推送，节点从仓库拉取 |
 
-### K8s 基础镜像与镜像仓库
+### 镜像仓库（可选）
 
-**A. 使用已有外部仓库（推荐 ACR/Harbor）**
+**没有现成仓库（默认）**：不传 `--registry`，节点从公网或镜像加速拉取。
 
-以阿里云 ACR 为例，先准备仓库：
-
-1. 在 ACR 控制台创建命名空间 `my-k8s`，获取仓库地址、用户名和密码，并确认 master 能访问该地址。
-2. 预推 Kubekey 基础镜像（只需一次）：
-
-```bash
-export REGISTRY_USER='<ACR 用户名>'
-export REGISTRY_PASSWORD='<ACR 密码>'
-docker login registry.cn-hangzhou.aliyuncs.com \
-  -u "$REGISTRY_USER" --password-stdin <<< "$REGISTRY_PASSWORD"
-REG=registry.cn-hangzhou.aliyuncs.com NS=my-k8s bash scripts/push-k8s-images.sh
-```
-
-PowerShell 登录写法：`$env:REGISTRY_PASSWORD | docker login registry.cn-hangzhou.aliyuncs.com -u $env:REGISTRY_USER --password-stdin`。Harbor 把地址换成 `harbor.example.com`、项目名换成 `my-k8s`；HTTP/自签仓库先配置 Docker 信任，并加 `--registry-insecure`。
-
-3. 用该仓库创建集群：
+**已有现成仓库**（仓库里已有 K8s 基础镜像）：直接写地址；需要认证再带用户名密码。
 
 ```bash
 python k8slab.py up \
   --compose examples/library-app/docker-compose.yml \
-  --registry registry.cn-hangzhou.aliyuncs.com/my-k8s \
-  --registry-user "$REGISTRY_USER" \
-  --registry-password "$REGISTRY_PASSWORD" \
-  --image-mode registry
+  --ak <AccessKeyId> --sk <AccessKeySecret> \
+  --registry registry.example.com/my-k8s \
+  --registry-user <用户名> --registry-password <密码> \
+  --nodeport-start 30111
 ```
 
-如果不想手动预推，首次在 `up` 时加 `--registry-push-k8s`，由 master 拉取并推送基础镜像；之后去掉该参数即可：
-
-```bash
-python k8slab.py up \
-  --compose examples/library-app/docker-compose.yml \
-  --registry registry.cn-hangzhou.aliyuncs.com/my-k8s \
-  --registry-user "$REGISTRY_USER" \
-  --registry-password "$REGISTRY_PASSWORD" \
-  --registry-push-k8s \
-  --image-mode registry
-```
-
-- K8s 基础镜像从 `<registry>/<namespace>` 拉取；`registry` 模式下业务镜像也推送到该前缀。地址不带路径时，K8s 命名空间默认 `kubesphereio`。
-- 仓库必须已包含 Kubekey 所需基础镜像；`--registry-push-k8s` 会从 `registry.cn-beijing.aliyuncs.com/kubesphereio` 拉取并推送，首次耗时较长。
-- 认证也可用 `K8SLAB_REGISTRY_USER` / `K8SLAB_REGISTRY_PASSWORD`；节点认证写入 Kubekey `auths`，本机推送前自动执行 `docker login`。仓库密码会写入 master 上的 Kubekey 配置文件（权限 600）。
-- HTTP/自签仓库加 `--registry-insecure`；本机及 master 的 Docker 仍需信任该仓库。
-- 只写 `--registry` 而不指定 `--image-mode registry` 时，外部仓库只用于 K8s 基础镜像，业务镜像仍按 `auto` 模式处理。
-
-**B. 使用 master 本地临时仓库**
-
-- `--private-registry`：在 master1 启动 registry，K8s 基础镜像只在 master 拉取一次，其他节点从 master 拉取。
-- 适合临时环境或没有外部仓库的场景；使用前确认 master 磁盘空间足够。
-- 与外部 `--registry` 同时使用时：K8s 基础镜像仍走 master 本地仓库，`--registry` 只用于业务镜像。
+- ACR、Harbor 都可以，填控制台给的仓库地址即可。
+- 地址格式是 `host/namespace`；不写 namespace 时默认 `kubesphereio`。
+- 仓库里没有 K8s 基础镜像时，不要指定 `--registry`，按默认方式直接拉取。
+- 只有业务镜像也要推送到仓库时，才加 `--image-mode registry`。
+- 节点不能访问公网、必须用 master 做本地仓库时，属于高级场景，见 `--help` 的 `--private-registry`。
 
 ### 可选：Ingress
 
