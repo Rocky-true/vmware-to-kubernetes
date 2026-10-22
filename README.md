@@ -561,7 +561,7 @@ terraform init -migrate-state
 
 ```bash
 python course-selection/tests/run_fixtures.py
-python course-selection/tests/test_datamigrate.py
+python tests/test_datamigrate.py
 python course-selection/tests/test_k8slab.py
 ```
 
