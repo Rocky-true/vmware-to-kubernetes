@@ -580,6 +580,13 @@ python course-selection/tests/test_k8slab.py
 | `url-shortener` | 30105/30106/30107 | 页面 200；短链写入 Redis；密码鉴权生效 |
 | `library-app` | 30111 | 页面 200；图书增查/借还；删 db Pod 后数据保留 |
 
+### 数据迁移上云验证（阿里云 K8s）
+
+- 源：VMware 上的 `library-app` PostgreSQL（4 本书）
+- 目标：阿里云 3 主 3 从 K8s 新集群，`library` 命名空间
+- 流程：`plan → preflight → dump → transfer → restore → verify → start` 全部通过
+- 结果：目标页面 200，`/api/stats` total=4，源/目标 `books` 均为 4
+
 ## 目录结构
 
 ```text
