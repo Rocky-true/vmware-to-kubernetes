@@ -12,7 +12,7 @@
 - [功能特性](#功能特性)
 - [环境要求](#环境要求)
 - [快速开始：阿里云](#快速开始阿里云)
-- [数据迁移参考（datamigrate）](#数据迁移参考datamigrate)
+- [数据迁移（datamigrate）](#数据迁移datamigrate)
 - [k8slab 使用手册](#k8slab-使用手册)
 - [部署到已有 K8s 集群](#部署到已有-k8s-集群)
 - [Compose 转换规则](#compose-转换规则)
@@ -35,7 +35,7 @@
 - 把 Docker Compose 转换为可审查的 Kubernetes 清单，支持本机构建、离线镜像包和私有仓库。
 - 提供 `doctor`、`status`、`destroy` 等运维命令，以及部署后的 HTTP 验证。
 - 内置安全默认值：收敛公网入口、随机节点密码、内网 SLB API、忽略敏感文件。
-- 附带数据迁移参考工具，适合验证迁移流程，不作为生产迁移的唯一保障。
+- 附带数据迁移工具，支持 MySQL/PostgreSQL/Redis/MongoDB/SQLite 与文件卷，并已在阿里云 K8s 完成 PostgreSQL 端到端验证。
 
 **相关关键词**：运维工具、云计算运维、Kubernetes 运维、K8s 集群部署、DevOps 工具、SRE、自动化运维、Terraform、Kubekey、Docker Compose 迁移、阿里云运维、故障排查、SLB、Ingress。
 
@@ -49,9 +49,9 @@
 |---|---|---|
 | `k8slab.py` | 创建阿里云 VPC/ECS/安全组/SLB，安装 Kubekey 集群，并部署应用 | `k8slab.py up` |
 | `course-selection/vm2k8s.py` | 把 Compose 转成 K8s 清单，部署到已有集群 | `vm2k8s.py ship` |
-| `course-selection/datamigrate.py` | 可选参考：迁移数据库和文件卷，不参与一键部署 | `datamigrate.py run` |
+| `course-selection/datamigrate.py` | 迁移数据库和文件卷，独立于一键部署 | `datamigrate.py run` |
 
-`k8slab` 内部会调用 `vm2k8s`；也可以只使用 `vm2k8s`，把应用部署到已有 kubeadm/K3s 集群。`datamigrate` 独立于部署流程，仅作参考；需要搬迁数据时使用，生产迁移需自行验证。
+`k8slab` 内部会调用 `vm2k8s`；也可以只使用 `vm2k8s`，把应用部署到已有 kubeadm/K3s 集群。`datamigrate` 独立于部署流程；需要搬迁数据时使用，生产迁移需自行验证。
 
 ### 适用场景
 
@@ -120,7 +120,7 @@ python k8slab.py export --out k8slab-kit.zip --with-provider
 
 - 工具以单个 `docker-compose.yml` 为输入，不解析裸进程、systemd unit 或 VM 镜像。
 - 没有 compose 文件时，需要先根据 `docker run`、systemd、端口和挂载信息自行编写，并确保 `docker compose up` 能跑通。
-- 转换器只生成部署清单和空 PVC。数据迁移不在主流程内；`datamigrate.py` 仅提供参考计划和脚本，生产环境仍需自行安排停机窗口、备份、校验与回滚。
+- 转换器只生成部署清单和空 PVC。数据迁移不在主流程内；`datamigrate.py` 负责生成计划、脚本并执行迁移，生产环境仍需自行安排停机窗口、备份、校验与回滚。
 
 ## 快速开始：阿里云
 
@@ -186,15 +186,15 @@ python k8slab.py destroy --run "<workdir>" --purge
 4. `vm2k8s` 转换 Compose，构建或分发镜像。
 5. apply 清单、分配 NodePort、等待滚动更新、执行 HTTP 验证。
 
-## 数据迁移参考（datamigrate）
+## 数据迁移（datamigrate）
 
-> 本节仅作参考，不属于 `k8slab up` 的必需流程。`datamigrate.py` 用于生成迁移计划、脚本和工件，便于验证迁移思路；生产迁移仍需结合停机窗口、备份、校验和回滚预案人工执行。
+> 独立于 `k8slab up` 的迁移流程，已在阿里云 K8s 上完成端到端验证。生产迁移仍需结合停机窗口、备份、校验和回滚预案人工执行。
 
-`course-selection/datamigrate.py` 在应用部署完成后迁移数据库与文件卷，不保证零停机或生产级一致性。
+`course-selection/datamigrate.py` 根据 Compose 生成迁移计划，并在目标集群完成数据库/文件卷迁移，不保证零停机。
 
 - `plan` 只分析 Compose 并生成计划，不连接源端或目标集群。
-- `run` 按阶段执行，支持 `--dry-run`、`--resume` 和 `--only`。
-- 备份和恢复通过容器/Pod 内的数据库客户端完成。
+- `run` 按阶段执行，支持 `--dry-run`、`--resume`、`--only`、`--quiesce`。
+- 数据库通过源容器/目标 Pod 内的客户端备份恢复；原始卷通过临时容器/Pod 归档解包。
 
 ### 1. 生成计划
 
@@ -224,11 +224,11 @@ python course-selection/datamigrate.py run --plan data-migration/migration-plan.
 python course-selection/datamigrate.py run --plan data-migration/migration-plan.json --phase start
 ```
 
-### 参考支持范围
+### 支持范围
 
 | 数据 | 备份 | 恢复 |
 |---|---|---|
-| MySQL / MariaDB | `mysqldump` / `mariadb-dump` | `mysql` 客户端导入 |
+| MySQL / MariaDB | `mysqldump` / `mariadb-dump` | `mysql` / `mariadb` 客户端导入 |
 | PostgreSQL | `pg_dump` 纯 SQL | `psql` 导入 |
 | Redis | `redis-cli --rdb` | RDB 恢复到 PVC（目标不要启用 AOF） |
 | MongoDB | `mongodump --archive --gzip` | `mongorestore` |
@@ -239,22 +239,40 @@ python course-selection/datamigrate.py run --plan data-migration/migration-plan.
 
 | 选项 | 说明 |
 |---|---|
+| `--out` | 计划输出目录；默认 `data-migration/<namespace>` |
+| `--namespace` | 目标命名空间；默认 Compose 目录名 |
+| `--source-ssh` / `--target-ssh` | 源/目标 SSH；省略时分别使用本机 Docker/kubectl |
 | `--source-project` | Compose 项目名；默认取 Compose 目录名 |
 | `--source-dir` | 源项目目录；SSH 模式下解析 bind 路径 |
+| `--target-dir` | 目标节点工件目录；默认 `~/datamigrate/<namespace>` |
+| `--kubectl` | 目标端 kubectl 命令，默认 `kubectl` |
+| `--include` / `--exclude` | 只迁移 / 排除指定服务（逗号分隔） |
+| `--database-map` | 服务=数据库名，覆盖自动探测 |
+| `--container-map` | 服务=容器名/ID，覆盖自动探测 |
 | `--volume-map` | 源卷名映射，如 `mysql-data=myproj_mysql-data` |
-| `--include-bind-dirs` | 把 bind 目录加入归档计划 |
+| `--include-bind-dirs` | 把 bind 目录加入归档计划（仅备份） |
+| `--ephemeral` | 目标使用 emptyDir；原始卷不恢复 |
 | `--helper-image` | 原始卷恢复镜像；镜像缺少 `sh`/`tar` 时使用 |
 | `--resume` | 跳过已完成的 dump |
-| `--verify-rows` / `--no-verify-rows` | 控制行数校验 |
-| `--stop-apps` / `--no-stop-apps` | 控制恢复前是否缩容应用 |
-| `--clean-volume` / `--no-clean-volume` | 控制恢复前是否清空目标卷 |
+| `--only` | 只执行指定 job ID 或服务（逗号分隔） |
+| `--phase` | `preflight` / `dump` / `transfer` / `restore` / `verify` / `start` / `all` |
+| `--yes` | 跳过 restore 前确认 |
+| `--quiesce` / `--no-quiesce` | dump 时暂停源服务容器（默认关闭） |
+| `--verify-rows` / `--no-verify-rows` | 行数校验（默认开启） |
+| `--stop-apps` / `--no-stop-apps` | 恢复前缩容应用（默认开启） |
+| `--clean-volume` / `--no-clean-volume` | 恢复前清空目标卷 |
+| `--keep-helper` | 保留 helper Pod 便于排查 |
 
 ### 注意事项
 
-- 计划产物包括 `migration-plan.json`、`RUNBOOK.md`、`scripts/*.sh`、`scripts/*.ps1` 和 `artifacts/`。
+- 未指定 `--source-ssh` / `--target-ssh` 时，分别使用本机 Docker 和 kubectl。
+- plan 生成 `migration-plan.json`、`RUNBOOK.md`、`scripts/*.sh`、`scripts/*.ps1`；dump 阶段生成 `artifacts/`。
 - 源端卷名默认按 `<项目名>_<卷名>` 和原名探测；特殊卷名使用 `--volume-map`。
+- SSH 源端解析 bind 路径时必须提供 `--source-dir`；bind 目录只归档，不自动恢复。
+- Redis 原始卷恢复需要目标 PVC；未检测到卷或使用 `--ephemeral` 时会告警并跳过原始恢复。
+- SQLite 位于 bind 目录时不会自动转换，计划中会给出告警。
 - 密码不写入计划：执行时在容器/Pod 内通过环境变量读取。
-- `restore` 会先缩容非数据库服务，失败时保持停止；修复后执行 `verify`，再执行 `start`。
+- `restore` 会先缩容非数据库服务（保留 MySQL/PostgreSQL/MongoDB），失败时保持停止；修复后执行 `verify`，再执行 `start`。
 - SQLite 和原始卷恢复需要停止目标 Deployment，工具自动处理。
 - 原始卷恢复默认复用服务镜像；distroless 等镜像缺少工具时加 `--helper-image busybox:1.36`。
 - 生产迁移请先在预发环境演练，并保留可回滚备份；不要把本工具当作生产迁移的唯一保障。
@@ -458,7 +476,7 @@ Dockerfile + 构建上下文    build 模式必需
 
 - named volume 转为 PVC；local-path 使用节点本地盘，只支持单副本读写（RWO）。
 - 单文件 bind mount 转为 ConfigMap；目录型/缺失 bind mount 默认跳过并告警，`--strict-bind` 会直接失败。
-- 数据迁移仅作参考：`datamigrate` 默认需要停机窗口，不处理增量同步、CDC 或跨数据库 schema 转换。
+- `datamigrate` 默认需要停机窗口，不处理增量同步、CDC 或跨数据库 schema 转换。
 - `datamigrate` 的逻辑恢复会覆盖同名对象，不是零停机方案。
 
 **启动顺序与集群**
@@ -605,11 +623,12 @@ python course-selection/tests/test_k8slab.py
 │   └── ...
 ├── course-selection/
 │   ├── vm2k8s.py                 # assess / convert / ship
-│   ├── datamigrate.py            # 数据迁移参考：plan / run
+│   ├── datamigrate.py            # 数据迁移：plan / run
 │   ├── app/                      # 示例后端
 │   ├── k8s/                      # 生成的示例清单
 │   ├── loadtest/                 # 1000 并发压测
-│   └── tests/                    # 转换器与数据迁移测试
+│   └── tests/                    # 转换器与 k8slab 测试
+├── tests/                        # datamigrate 测试
 ├── examples/                     # 四个全栈示例
 ├── docs/assets/                  # 架构图
 └── README.md
