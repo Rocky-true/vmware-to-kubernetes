@@ -155,6 +155,15 @@ python k8slab.py up \
 
 仓库不需要认证时，去掉 `--registry-user` 和 `--registry-password`。只有希望业务镜像也推送到该仓库时，才需要加 `--image-mode registry`。
 
+镜像仓库相关参数：
+
+| 参数 | 说明 |
+|---|---|
+| `--registry ADDR[/NS]` | 已有仓库地址；不填则直接拉取 |
+| `--registry-user USER` | 仓库用户名；不需要认证时省略 |
+| `--registry-password PASS` | 仓库密码；不需要认证时省略 |
+| `--image-mode registry` | 业务镜像也推送到仓库 |
+
 地址格式是 `host/namespace`；不写 namespace 时默认 `kubesphereio`。仓库里没有 K8s 基础镜像时，不要指定 `--registry`，按默认方式直接拉取。默认 3 主 3 从；实验环境想省费用可加 `--no-ha`，worker 数量用 `--workers N`，其余参数见 `--help`。
 
 也可以使用环境变量提供凭证：
