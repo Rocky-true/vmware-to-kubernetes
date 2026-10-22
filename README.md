@@ -178,17 +178,8 @@ python k8slab.py up --compose examples/library-app/docker-compose.yml
 ### 3. 查看状态与销毁
 
 ```bash
-# 查看最近一次运行
 python k8slab.py status
-
-# 查看指定运行目录
-python k8slab.py status --run "<workdir>"
-
-# 销毁最近一次运行创建的资源
 python k8slab.py destroy
-
-# 销毁并删除本地运行记录
-python k8slab.py destroy --run "<workdir>" --purge
 ```
 
 运行目录默认是 `~/.k8slab/runs/<项目名>-<时间戳>`，里面有 `run.json`、`node_password.txt`、`kubekey-cluster.yaml` 和生成的 K8s 清单。不要分享整个运行目录。
@@ -360,156 +351,62 @@ python k8slab.py up \
 
 ### 可选：Ingress
 
-默认只生成 NodePort。需要域名访问时加 `--ingress`：
+默认用 NodePort，不需要额外配置。需要域名访问时加 `--ingress`：
 
 ```bash
-# 每个服务一个子域名：<service>.<host>
-python course-selection/vm2k8s.py convert \
-  --compose docker-compose.yml --out k8s --namespace app \
-  --ingress --ingress-host example.com
-
-# 显式映射：服务=域名[/路径]
-python course-selection/vm2k8s.py convert \
-  --compose docker-compose.yml --out k8s --namespace app \
-  --ingress --ingress-map "frontend=app.example.com,backend=api.example.com"
-
-# 使用已有 TLS Secret
-python course-selection/vm2k8s.py convert \
-  --compose docker-compose.yml --out k8s --namespace app \
-  --ingress --ingress-host example.com --ingress-tls-secret app-tls
+python k8slab.py up \
+  --compose examples/library-app/docker-compose.yml \
+  --ingress
 ```
 
-说明：
-
-- 只为 `ports` 发布且端口属于 HTTP 的 Service 生成 Ingress，`expose` 不会暴露。
-- 不传 host 时退化为路径 `/<service>`，并添加 nginx rewrite 注解。
-- 生成 `07-ingress.yaml`；NodePort 仍保留作为回退。
-- 集群需要 ingress-controller：`bash scripts/install-ingress-nginx.sh`。
-- TLS 只引用已有 Secret，不包含 cert-manager。
-- `k8slab --ingress` 默认使用 `<master1公网IP>.nip.io`，无需配置 DNS。
-
+- `k8slab` 默认使用 `<master1公网IP>.nip.io`，无需配置 DNS。
+- 已有域名时加 `--ingress-host example.com`。
+- 单独转换时写 `--ingress --ingress-host example.com`。
+- 集群需要 ingress-controller；TLS、路径映射等高级参数见 `--help`。
 ## 部署到已有 K8s 集群
 
-只需要转换和部署时，直接使用 `vm2k8s`。以下命令在仓库根目录执行：
+只做转换和部署时，用 `vm2k8s`。两种常用方式：
 
 ```bash
-# 1. 评估迁移批次
-python course-selection/vm2k8s.py assess --compose docker-compose.yml
+# 本机 kubectl 已指向目标集群
+python course-selection/vm2k8s.py ship \
+  --compose docker-compose.yml --namespace app
 
-# 2. 生成 K8s 清单
-python course-selection/vm2k8s.py convert \
-  --compose docker-compose.yml --out k8s --namespace app \
-  --nodeport-start 30111
-
-# 3. 一键部署：镜像分发 + apply + 滚动等待 + 验证
+# 通过 SSH 部署到远程 master
 python course-selection/vm2k8s.py ship \
   --compose docker-compose.yml --namespace app \
-  --image-mode save --bundle images.tar.gz \
   --remote root@<master1> --ssh-key keys/id_ed25519 \
-  --node-password '<节点密码>' \
-  --nodeport-start 30111 --verify frontend=/
+  --node-password '<节点密码>'
 ```
 
-如果 kubectl 已经指向目标集群，可以省略 `--remote`，使用本机 kubectl 部署：
+只生成清单、不部署：
 
 ```bash
-python course-selection/vm2k8s.py ship \
-  --compose docker-compose.yml --namespace app \
-  --image-mode none --nodeport-start 30111
+python course-selection/vm2k8s.py convert \
+  --compose docker-compose.yml --out k8s --namespace app
 ```
 
-生成物：
-
-| 文件 | 内容 |
-|---|---|
-| `00-namespace.yaml` | Namespace |
-| `01-configmap.yaml` | 非敏感环境变量、bind 文件 |
-| `02-secret.yaml` | 密码、Token、命令中提取的密钥 |
-| `03-deployments.yaml` | Deployment |
-| `04-services.yaml` | Service |
-| `05-pvcs.yaml` | PVC（使用命名卷时） |
-| `06-deploy.sh` | apply + NodePort 分配 |
-| `07-ingress.yaml` | 可选 Ingress |
-| `MIGRATION.md` | 服务表、风险告警、已知限制 |
-
-常用转换参数：
-
-| 参数 | 说明 |
-|---|---|
-| `--ephemeral` | 用 emptyDir 代替 PVC |
-| `--image-map` | `服务=镜像,服务=镜像` |
-| `--strict-bind` | bind 目录/缺失源直接失败 |
-| `--depends-init` | 将 `depends_on` 转为 TCP 等待 initContainer |
-| `--init-image` | initContainer 镜像，默认 `busybox:1.36` |
-| `--ingress` | 生成 Ingress |
-| `--ingress-host` | 基础域名 |
-| `--ingress-map` | 显式域名映射 |
-| `--ingress-class` | IngressClass |
-| `--ingress-tls-secret` | 已有 TLS Secret |
-
-### 远端部署的文件要求
-
-```text
-docker-compose.yml        必需
-images.tar.gz             save 模式必需
-keys/id_ed25519           远端 SSH 必需
-Dockerfile + 构建上下文    build 模式必需
-```
+默认镜像模式是 `auto`；离线时用 `--image-mode save --bundle images.tar.gz`。生成物、镜像分发和高级参数见 `--help` 以及生成的 `MIGRATION.md`。
 
 ## Compose 转换规则
 
-### 支持的 Compose 特性
-
-| Compose 特性 | 转换结果 |
+| Compose | Kubernetes |
 |---|---|
-| `image` / `build` | Deployment；多 build 自动命名 `local/<service>:latest` |
+| `image` / `build` | Deployment |
 | `ports` / `expose` | Service；`ports` 分配 NodePort |
-| `environment` / `env_file` | ConfigMap 与 Secret 拆分注入 |
-| `command` / `entrypoint` | 字符串转 `/bin/sh -c`，列表原样保留 |
-| named / anonymous volume | PVC（`--ephemeral` 时 emptyDir） |
-| 单文件 bind mount | ConfigMap + subPath |
-| `healthcheck` | HTTP URL → httpGet，否则 tcpSocket |
-| `deploy.resources` / `replicas` | requests/limits + 副本数 |
-| compose `secrets` / `configs` | K8s Secret/ConfigMap + subPath |
-| `labels` / `working_dir` / `user` | 标签 / workingDir / securityContext |
-| `depends_on` | 默认忽略；`--depends-init` 转为 TCP initContainer |
+| `environment` / `env_file` | ConfigMap / Secret |
+| named volume / 单文件 bind | PVC / ConfigMap |
+| `healthcheck` | HTTP 或 TCP 探针 |
+| `depends_on` | 默认忽略；`--depends-init` 等待 TCP |
 
-### 已知限制
+主要限制：
 
-**Compose 与转换**
-
-- 仅支持单个 Compose 文件；`profiles` 不展开，多文件 override 需先合并。
-- 只有 `ports` 会生成 NodePort；`expose` 只生成集群内 ClusterIP。
-- NodePort 从 `--nodeport-start` 起按 Compose 顺序分配，有效范围 30000-32767。
-- 健康检查只识别简单 HTTP URL 或 TCP，复杂脚本退化为 TCP 探针。
-- 默认 resources 为 requests 100m/128Mi、limits 1C/1Gi，可通过 `deploy.resources` 覆盖。
-- Secret 依据变量名（PASS/SECRET/TOKEN）拆分；`command`/`entrypoint` 中的 `--requirepass`、`--password` 等参数会提取到 Secret。
-- 生产环境建议接入 KMS 或外部 Secret，不要把长期密钥直接放在清单里。
-
-**存储与数据**
-
-- named volume 转为 PVC；local-path 使用节点本地盘，只支持单副本读写（RWO）。
-- 单文件 bind mount 转为 ConfigMap；目录型/缺失 bind mount 默认跳过并告警，`--strict-bind` 会直接失败。
-- `datamigrate` 默认需要停机窗口，不处理增量同步、CDC 或跨数据库 schema 转换。
-- `datamigrate` 的逻辑恢复会覆盖同名对象，不是零停机方案。
-
-**启动顺序与集群**
-
-- `depends_on` 默认不建模启动顺序；`--depends-init` 只等待 TCP 端口，不等待业务健康检查。
-- `service_completed_successfully` 类型的依赖不会生成 initContainer，会记录告警。
-- 集群架构为 `linux/amd64`；Apple Silicon 构建时自动设置 `DOCKER_DEFAULT_PLATFORM=linux/amd64`。
-- 课程集群固定 Kubernetes 1.28.2（Kubekey 兼容性）；该版本已 EOL，生产环境应升级到受支持版本并改用 containerd。
-- 默认运行时为 Docker 24.0.9 + cri-dockerd；不要手工安装 Docker 25 及以上版本。
-
-**网络与安全**
-
-- 默认创建内网 SLB（TCP 6443）作为三台 master 的 API 入口；`--no-ha` 可回退到 master1 单点。
-- 安全组默认只允许 `admin_cidr` 访问 SSH/NodePort；`k8slab up` 自动检测本机公网 IP。
-- 直接使用 Terraform 时必须设置 `admin_cidr`，否则不会创建 SSH/NodePort 规则。
-- 6443 默认不对公网开放；需要公网 kubectl 时使用 SSH 隧道。
-- 80/443 默认公开，可用 `web_cidr` 关闭。
-- 节点 SSH 当前使用 root + 密码（Kubekey 配置）；生产环境建议切换密钥登录并限制来源。
-- 离线环境可在执行 `bootstrap-cluster.sh` 时提供 `CALICO_MANIFEST`/`CALICO_SHA256`、`LOCAL_PATH_MANIFEST`/`LOCAL_PATH_SHA256`，跳过下载并校验文件。
+- 只支持单个 Compose 文件；`profiles` 不展开。
+- `expose` 不生成 NodePort；目录型 bind 默认跳过，`--strict-bind` 可改为直接失败。
+- named volume 使用 local-path 时为单节点 RWO，应用保持单副本。
+- `--depends-init` 只等 TCP 端口，不等业务健康检查。
+- 固定 Kubernetes 1.28.2 和 Docker 24 + cri-dockerd；生产环境应升级并改用 containerd。
+- `datamigrate` 默认需要停机窗口，恢复会覆盖同名对象，不做增量同步。
 
 ## 示例项目
 
@@ -526,54 +423,22 @@ Dockerfile + 构建上下文    build 模式必需
 
 ## 运维与安全
 
-### 状态与清理
+查看状态和销毁资源：
 
 ```bash
-# 查看最近一次运行
 python k8slab.py status
-
-# 查看指定运行
 python k8slab.py status --run "<workdir>"
-
-# 销毁资源
 python k8slab.py destroy --run "<workdir>"
-
-# 直接使用 Terraform
-terraform destroy -auto-approve
 ```
 
-### 安全默认值
+安全默认值：
 
-- `terraform.tfvars`、`keys/`、`*.tfstate`、`node_password.txt`、`backend.tf` 已加入 `.gitignore`。
-- 直接使用 Terraform 时，`node_password` 无默认值，必须显式提供。
-- `k8slab` 未传 `--password` 时会生成随机密码，并写入权限 600 的 `node_password.txt`。
-- `admin_cidr` 默认自动检测本机公网 IP；SSH/NodePort 不再默认对 `0.0.0.0/0` 开放。
-- 6443 默认不开放；不要直接把 API Server 暴露到公网。
-- `k8slab` 会在运行目录写入 `node_password.txt` 和 `kubekey-cluster.yaml`，不要分享整个目录。
-- `deploy.ps1` 是兼容脚本，新环境优先使用 `k8slab.py`；它要求 `K8S_NODE_PASSWORD`，不再硬编码 Terraform 路径。
-- 节点 SSH 当前使用 root + 密码；生产环境建议改为密钥登录，并进一步收紧 `admin_cidr`。
+- `k8slab` 自动生成节点密码，写入权限 600 的 `node_password.txt`。
+- `terraform.tfvars`、`keys/`、`*.tfstate`、`node_password.txt`、`backend.tf` 已在 `.gitignore`。
+- SSH/NodePort 默认只允许本机公网 IP，6443 不对公网开放。
+- 不要分享整个运行目录；`kubekey-cluster.yaml` 包含节点密码。
 
-### 远程 state（可选）
-
-`tfstate` 包含节点密码等敏感信息，默认只保存在本地且未加密。生产环境建议迁移到阿里云 OSS：
-
-```bash
-cp backend.tf.example backend.tf
-# 修改 bucket / key / region
-terraform init -migrate-state
-```
-
-`backend.tf` 已加入 `.gitignore`。OSS backend 不提供状态锁，多人同时操作前需要自行协调。
-
-### 手动部署兼容脚本
-
-`deploy.ps1` 保留用于手动分步部署。它需要：
-
-- Terraform 已在 `PATH` 中，或设置 `TERRAFORM_PATH`。
-- 设置 `K8S_NODE_PASSWORD`，或传入 `-NodePassword`。
-- 已存在的 `keys/id_ed25519` 和 Terraform outputs。
-
-新环境优先使用 `k8slab.py`。
+需要 OSS 远程 state 或手动部署时，参考 `backend.tf.example` 和 `deploy.ps1`。
 
 ## 故障排查
 
@@ -597,20 +462,7 @@ python tests/test_datamigrate.py
 python course-selection/tests/test_k8slab.py
 ```
 
-测试覆盖：
-
-- `run_fixtures.py`：11 类场景，包括 WordPress+MySQL、Prometheus+Grafana、字符串 command、多 build、HTTP 探针、bind + secret、expose-only、Ingress、命令密码提取、`--strict-bind`、`--depends-init`。
-- `test_datamigrate.py`：MySQL/PostgreSQL/SQLite/命名卷/Redis 无卷/bind 目录、`--source-dir`、`--dry-run`、`--no-stop-apps`、产物清单。
-- `test_k8slab.py`：名称清洗、Kubekey 配置、SLB `api_endpoint` 回退。
-
-四个示例项目已在 VMware k3s 完成「Compose 运行 → 转换 → 部署 → 写入/读取 → 删除 Pod 后 PVC 数据保留」验证，并在阿里云 3 主 3 从集群完成端到端复验：
-
-| 项目 | NodePort | 验证结果 |
-|---|---|---|
-| `todo-app` | 30101/30102 | 页面 200；待办增查；删 Pod 后数据保留 |
-| `weather-dashboard` | 30103/30104 | 页面 200；天气 API 返回 JSON |
-| `url-shortener` | 30105/30106/30107 | 页面 200；短链写入 Redis；密码鉴权生效 |
-| `library-app` | 30111 | 页面 200；图书增查/借还；删 db Pod 后数据保留 |
+四个示例已在 VMware k3s 和阿里云 K8s 完成部署、读写和 PVC 持久化验证；数据迁移已在阿里云完成 PostgreSQL 端到端验证。
 
 ### 数据迁移上云验证（阿里云 K8s）
 
@@ -623,38 +475,19 @@ python course-selection/tests/test_k8slab.py
 
 ```text
 .
-├── k8slab.py                     # 集群编排入口：doctor/up/status/destroy/export
+├── k8slab.py                     # 集群编排入口
 ├── main.tf / variables.tf / outputs.tf
-├── backend.tf.example            # 可选 OSS 远程 state
-├── deploy.ps1                    # 手动分步部署兼容脚本
-├── cloud-init/                   # 节点初始化
-├── scripts/
-│   ├── install-kk.sh             # 安装 Kubekey
-│   ├── bootstrap-cluster.sh      # 镜像加速 / CNI / 存储类
-│   ├── push-k8s-images.sh        # 推送 K8s 镜像
-│   ├── distribute-images.sh      # 节点镜像离线分发
-│   ├── install-ingress-nginx.sh  # Ingress Controller
-│   └── ...
+├── scripts/                      # 安装、镜像、Ingress 脚本
 ├── course-selection/
-│   ├── vm2k8s.py                 # assess / convert / ship
-│   ├── datamigrate.py            # 数据迁移：plan / run
-│   ├── app/                      # 示例后端
-│   ├── k8s/                      # 生成的示例清单
-│   ├── loadtest/                 # 1000 并发压测
+│   ├── vm2k8s.py                 # Compose → K8s
+│   ├── datamigrate.py            # 数据迁移
 │   └── tests/                    # 转换器与 k8slab 测试
 ├── tests/                        # datamigrate 测试
 ├── examples/                     # 四个全栈示例
-├── docs/assets/                  # 架构图
-└── README.md
+└── docs/assets/                  # 架构图
 ```
 
-运行时生成、默认不提交的目录：
-
-- `keys/`：SSH 密钥。
-- `data-migration/`：迁移计划、脚本和工件。
-- `*-k8s/`：生成的 K8s 清单。
-- `~/.k8slab/runs/`：`k8slab` 运行目录。
-- `terraform.tfstate`、`backend.tf`、`node_password.txt`：敏感或环境相关文件。
+运行目录（`~/.k8slab/runs/`）、`keys/`、`data-migration/`、`*-k8s/`、`terraform.tfstate` 和 `node_password.txt` 默认不提交。
 
 ## License
 
