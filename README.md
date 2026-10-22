@@ -241,41 +241,22 @@ python course-selection/datamigrate.py run --plan data-migration/migration-plan.
 |---|---|
 | `--out` | 计划输出目录；默认 `data-migration/<namespace>` |
 | `--namespace` | 目标命名空间；默认 Compose 目录名 |
-| `--source-ssh` / `--target-ssh` | 源/目标 SSH；省略时分别使用本机 Docker/kubectl |
-| `--source-project` | Compose 项目名；默认取 Compose 目录名 |
+| `--source-ssh` / `--target-ssh` | 源/目标 SSH；省略时用本机 Docker/kubectl |
 | `--source-dir` | 源项目目录；SSH 模式下解析 bind 路径 |
-| `--target-dir` | 目标节点工件目录；默认 `~/datamigrate/<namespace>` |
-| `--kubectl` | 目标端 kubectl 命令，默认 `kubectl` |
-| `--include` / `--exclude` | 只迁移 / 排除指定服务（逗号分隔） |
-| `--database-map` | 服务=数据库名，覆盖自动探测 |
-| `--container-map` | 服务=容器名/ID，覆盖自动探测 |
-| `--volume-map` | 源卷名映射，如 `mysql-data=myproj_mysql-data` |
-| `--include-bind-dirs` | 把 bind 目录加入归档计划（仅备份） |
-| `--ephemeral` | 目标使用 emptyDir；原始卷不恢复 |
-| `--helper-image` | 原始卷恢复镜像；镜像缺少 `sh`/`tar` 时使用 |
-| `--resume` | 跳过已完成的 dump |
-| `--only` | 只执行指定 job ID 或服务（逗号分隔） |
 | `--phase` | `preflight` / `dump` / `transfer` / `restore` / `verify` / `start` / `all` |
-| `--yes` | 跳过 restore 前确认 |
-| `--quiesce` / `--no-quiesce` | dump 时暂停源服务容器（默认关闭） |
-| `--verify-rows` / `--no-verify-rows` | 行数校验（默认开启） |
-| `--stop-apps` / `--no-stop-apps` | 恢复前缩容应用（默认开启） |
-| `--clean-volume` / `--no-clean-volume` | 恢复前清空目标卷 |
-| `--keep-helper` | 保留 helper Pod 便于排查 |
+| `--resume` | 跳过已完成的 dump |
+| `--dry-run` | 只预览，不执行 |
+| `--yes` | restore 前不再确认 |
+
+其余参数（服务/库/卷映射、bind、Redis/SQLite、行数校验、helper 镜像等）见 `python course-selection/datamigrate.py run --help`。
 
 ### 注意事项
 
-- 未指定 `--source-ssh` / `--target-ssh` 时，分别使用本机 Docker 和 kubectl。
-- plan 生成 `migration-plan.json`、`RUNBOOK.md`、`scripts/*.sh`、`scripts/*.ps1`；dump 阶段生成 `artifacts/`。
-- 源端卷名默认按 `<项目名>_<卷名>` 和原名探测；特殊卷名使用 `--volume-map`。
+- plan 生成 `migration-plan.json`、`RUNBOOK.md`、`scripts/*`；dump 阶段生成 `artifacts/`。
 - SSH 源端解析 bind 路径时必须提供 `--source-dir`；bind 目录只归档，不自动恢复。
-- Redis 原始卷恢复需要目标 PVC；未检测到卷或使用 `--ephemeral` 时会告警并跳过原始恢复。
-- SQLite 位于 bind 目录时不会自动转换，计划中会给出告警。
-- 密码不写入计划：执行时在容器/Pod 内通过环境变量读取。
-- `restore` 会先缩容非数据库服务（保留 MySQL/PostgreSQL/MongoDB），失败时保持停止；修复后执行 `verify`，再执行 `start`。
-- SQLite 和原始卷恢复需要停止目标 Deployment，工具自动处理。
-- 原始卷恢复默认复用服务镜像；distroless 等镜像缺少工具时加 `--helper-image busybox:1.36`。
-- 生产迁移请先在预发环境演练，并保留可回滚备份；不要把本工具当作生产迁移的唯一保障。
+- 密码不写入计划，执行时在容器/Pod 内通过环境变量读取。
+- `restore` 默认需要停机，并会覆盖同名对象；生产迁移先演练并保留可回滚备份。
+- Redis/SQLite/原始卷、helper 镜像等细节见 `--help`，不需要一开始就填。
 
 ## k8slab 使用手册
 
